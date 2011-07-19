@@ -1,23 +1,32 @@
-SPLC ?= ../../cfa/splc
-TESLA_CLANG ?= ../../kernel/tesla-clang
+CC = gcc
+SPLC = ../../cfa/splc
+TESLA_CLANG = ../../kernel/tesla-clang
+DTRACE = dtrace
 
 OPTLEVEL ?= -O0
 
 CFLAGS=-Wall -g -I../.. -I. $(OPTLEVEL)
 
-TESLALIBS=                                      \
+PROVIDER_DESC  = ../../libtesla/tesla_dtrace.d
+PROVIDER_HDR   = ../../tesla/tesla_dtrace.h
+PROVIDER_OBJ   = tesla_dtrace.o
+MAIN_OBJ       = test.o
+TESLA_OBJS=                                      \
 	../../libtesla/tesla_state.o            \
 	../../libtesla/tesla_state_global.o     \
 	../../libtesla/tesla_state_perthread.o  \
 	../../libtesla/tesla_util.o
 
-.PHONY: all clean pdf micro
+LD_LIBS        = @LD_LIBS@
+TESLA_DTRACE_OBJS     = @TESLA_DTRACE_OBJS@
+DTFLAGS         = @DTFLAGS@
+
 all: test
 
 pdf: tcpc.pdf 
 
 %_assertion.o: %_assertion.c %_defs.h
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) $(DTFLAGS) -c $(CFLAGS) -o $@ $<
 
 %_defs.h %_automata.c %.spec: %.spl $(SPLC) Makefile
 	$(SPLC) -t tesla -s $* $<
@@ -32,14 +41,20 @@ tcpc.pdf: tcpc-all.dot.pdf
 	cp $< $@
 
 %_automata.o: %_automata.c %_defs.h
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) $(DTFLAGS) -c $(CFLAGS) -o $@ $<
 
-test.o: test.c tcpc_defs.h
+$(MAIN_OBJ): test.c tcpc_defs.h
 	cp instrumentation.spec.in instrumentation.spec
-	$(TESLA_CLANG) -c $(CFLAGS) -o test.o test.c
+	$(TESLA_CLANG) $(DTFLAGS) -c $(CFLAGS) -o $@ test.c
 
-test: test.o tcpc_assertion.o tcpc_automata.o ${TESLALIBS}
-	$(CC) -o $@ $^ -lpthread
+$(PROVIDER_HDR): $(PROVIDER_DESC)
+	$(DTRACE) -h -s $?
+
+$(PROVIDER_OBJ): $(MAIN_OBJ) tcpc_automata.o
+	$(DTRACE) -G -s $(PROVIDER_DESC) $?
+
+test: $(MAIN_OBJ) tcpc_assertion.o tcpc_automata.o $(TESLA_OBJS) $(TESLA_DTRACE_OBJS)
+	$(CC) $(DTFLAGS) -o test $? -lpthread $(LD_LIBS)
 
 instr_gcc.o: instr.c tcpc_defs.h
 	$(CC) -c $(CFLAGS) -o $@ $<
