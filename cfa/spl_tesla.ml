@@ -177,7 +177,21 @@ let pp_env genv env e =
   e.p "#include <tesla/tesla_state.h>";
   e.p "#include <tesla/tesla_util.h>";
   e.nl ();
+  e.p "#ifdef TESLA_DTRACE";
+  e.p "#include <tesla/tesla_dtrace.h>";
+  e.p "#endif";
+  e.nl ();
   e.p (sprintf "#include \"%s_defs.h\"" env.sname);
+  e.nl ();
+  e.p "#ifdef TESLA_DTRACE";
+  e.p "#ifdef _KERNEL";
+  e.p "/* Declare the provider to use for in-kernel tesla probes */";
+  e.p "SDT_PROVIDER_DECLARE(tesla_k);";
+  e.p "/* Define some probes for the above provider/module */";
+  e.p (( sprintf "SDT_PROBE_DEFINE2(tesla_k, automaton, %s, event, \"char *\", \"char
+  *\");" (env.sname) ););
+  e.p "#endif";
+  e.p "#endif";
   e.nl ();
   let num_of_state s = Hashtbl.find env.statenum s in
   export_fun_iter (fun func_name func_env func_def ->
@@ -303,6 +317,16 @@ let pp_env genv env e =
         Array.iteri (fun i s -> if s = scall then scnum := i) env.scnum;
         e.p (sprintf "case %d:  /* EVENT_%s */" !scnum (String.uppercase scall));
         indent_fn e (fun e ->
+          e.p "#ifdef TESLA_DTRACE";
+          e.p "#ifdef _KERNEL";
+          e.p "#else";
+          e.p "if(TESLA_EVENT_ENABLED())";
+          indent_fn e (fun e ->
+          e.p (sprintf "TESLA_EVENT(\"%s\", %d);" (String.uppercase scall)
+          (!scnum));
+          );
+          e.p "#endif";
+          e.p "#endif";
           e.p (sprintf "for (i=0; i < %s_NUM_STATES(tip); i++) {" uname);
           indent_fn e (fun e ->
             e.p (sprintf "switch (%s_STATE(tip,i)->state) {" uname);
@@ -311,26 +335,85 @@ let pp_env genv env e =
               let state_name = state.label in
               e.p (sprintf "case %d:" (num_of_state state_name));
               indent_fn e (fun e ->
+              e.p "#ifdef TESLA_DTRACE";
+              e.p "#ifdef _KERNEL";
+              e.p "#else";
+              e.p "if(TESLA_STATE_ENTRY_ENABLED())";
+              indent_fn e (fun e ->
+              e.p (sprintf "TESLA_STATE_ENTRY(\"%s\", %d);" (env.sname)
+              (num_of_state state_name));
+              );
+              e.p "#endif";
+              e.p "#endif";
+              e.nl ();
                 (* default symbol table is existing register values *)
-                List.iter (tickfn e [] state) targets;
-                e.p "break;";
+              List.iter (tickfn e [] state) targets;
+              e.nl ();
+              e.p "#ifdef TESLA_DTRACE";
+              e.p "#ifdef _KERNEL";
+              e.p "#else";
+              e.p "if(TESLA_STATE_EXIT_ENABLED())";
+              indent_fn e (fun e ->
+              e.p (sprintf "TESLA_STATE_EXIT(\"%s\", %d);" (env.sname)
+              (num_of_state state_name));
+              );
+              e.p "#endif";
+              e.p "#endif";
+              e.p "break;";
               );
             ) valid_states;
           e.p "default:";
-          indent_fn e (fun e -> e.p "break;");
+          indent_fn e (fun e ->
+              e.p "#ifdef TESLA_DTRACE";
+              e.p "#ifdef _KERNEL";
+              e.p "#else";
+              e.p "if(TESLA_STATE_ENTRY_ENABLED())";
+              indent_fn e (fun e ->
+              e.p (sprintf "TESLA_STATE_ENTRY(\"%s\", %s_STATE(tip,i)->state);" (env.sname)
+              (uname));
+              );
+              e.p "if(TESLA_STATE_EXIT_ENABLED())";
+              indent_fn e (fun e ->
+              e.p (sprintf "TESLA_STATE_EXIT(\"%s\", %s_STATE(tip,i)->state);" (env.sname)
+              (uname));
+              );
+              e.p "#endif";
+              e.p "#endif";
+              e.p "break;";
+          );
           e.p "}";
         );
         e.p "}";
         e.p ("newstate[0] = curpos-1;");
-        e.p ("if (newstate[0] == 0)");
-        indent_fn e (fun e -> e.p ("return 1; /* TESLA_ERROR */"));
+        e.p ("if (newstate[0] == 0) {");
+        indent_fn e (fun e ->
+        e.p "#ifdef TESLA_DTRACE";
+        e.p "/* XXXIM: Do we need this enabled by default?*/";
+        e.p "if(TESLA_AUTOMATON_VIOLATED_ENABLED())";
+        indent_fn e (fun e ->
+        e.p (sprintf "TESLA_AUTOMATON_VIOLATED(\"%s\", %d);" (String.uppercase scall)
+        (!scnum));
+        );
+        e.p "#endif";
+        e.p ("return 1; /* TESLA_ERROR */");
+        );
+        e.p "}";
         e.p (sprintf "memcpy(%s_PTR(tip), &newstate, sizeof(newstate));" uname);
         e.p "return 0;";
       );
       e.nl ()
     ) env.statecalls;
     e.p "default:";
-    indent_fn e (fun e -> e.p "return 1; /* TESLA_UNKNOWN_EVENT */");
+    indent_fn e (fun e ->
+        e.p "#ifdef TESLA_DTRACE";
+        e.p "/* XXXIM: Do we need this a enabled by default? Automaton */";
+        e.p "if(TESLA_EVENT_ENABLED())";
+        indent_fn e (fun e ->
+        e.p "TESLA_EVENT(\"TESLA_UNKNOWN_EVENT\", event);";
+        );
+        e.p "#endif";
+        e.p "return 1; /* TESLA_UNKNOWN_EVENT */";
+    );
     e.p "}";
     );
     e.p "}";
