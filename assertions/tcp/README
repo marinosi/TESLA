@@ -1,0 +1,34 @@
+TCP ASSERTION
+=============
+
+Pre-requisites
+--------------
+(Userspace) Autotools have been introduced to build this assertion example.
+Please install autotools.
+IMPORTANT: Build system needs refinement.
+
+Build tcp
+---------
+(Userspace) 
+
+1. Run autoconf to generate the configure script.
+
+2.
+    * To build with TESLA_DTRACE enabled:
+    ./configure --enable-dtrace
+    * To build without TESLA_DTRACE:
+    ./configure
+
+3. make
+
+Test
+----
+(Userspace)
+
+* If built with TESLA_DTRACE:
+
+	#tcp_tesla_dtrace.d is a sample dtrace script to fire dtrace probes.
+	dtrace -s tcp_tesla_dtrace.d -c ./test
+
+* If built without TESLA_DTRACE:
+    ./test
